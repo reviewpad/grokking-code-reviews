@@ -1,7 +1,7 @@
-# This file is used to configure Reviewpad.
-# The configuration is a proposal to help you get started.
-# You can use it as a starting point and customize it to your needs.
-# For more details see https://docs.reviewpad.com/guides/syntax.
+metrics-on-merge: true
+
+extends:
+  - https://github.com/reviewpad/.github/blob/dev/reviewpad-models/ship-show-ask.yml
 
 # Define the list of labels to be used by Reviewpad.
 # For more details see https://docs.reviewpad.com/guides/syntax#label.
@@ -20,15 +20,6 @@ labels:
 # A workflow is a list of actions that will be executed based on the defined rules.
 # For more details see https://docs.reviewpad.com/guides/syntax#workflow.
 workflows:
-  # This workflow assigns the most relevant reviewer to pull requests.
-  # This helps guarantee that most pull requests are reviewed by at least one person.
-  - name: reviewer-assignment
-    description: Assign the most relevant reviewer to pull requests
-    run:
-      # Automatically assign reviewer when the pull request is ready for review;
-      - if: $isDraft() == false
-        then: $assignCodeAuthorReviewers()
-
   # This workflow praises contributors on their pull request contributions.
   # This helps contributors feel appreciated.
   - name: praise-contributors-on-milestones
@@ -37,19 +28,6 @@ workflows:
       # Praise contributors on their first pull request.
       - if: $pullRequestCountBy($author()) == 1
         then: $commentOnce($sprintf("Thank you @%s for this first contribution!", [$author()]))
-
-  # This workflow validates that pull requests follow the conventional commits specification.
-  # This helps developers automatically generate changelogs.
-  # For more details, see https://www.conventionalcommits.org/en/v1.0.0/.
-  - name: check-conventional-commits
-    description: Validate that pull requests follow the conventional commits
-    run:
-      - if: $isDraft() == false
-        then:
-          # Check commits messages against the conventional commits specification
-          - $commitLint()
-          # Check pull request title against the conventional commits specification.
-          - $titleLint()
 
   # This workflow validates best practices for pull request management.
   # This helps developers follow best practices.
@@ -81,15 +59,6 @@ workflows:
         then: $addLabel("large")
         else: $removeLabel("large")
 
-  # This workflow signals pull requests waiting for reviews.
-  # This helps guarantee that pull requests are reviewed and approved by at least one person.
-  - name: check-approvals
-    description: Check that pull requests have the required number of approvals
-    run:
-      # Label pull requests with `waiting-for-review` if there are no approvals;
-      - if: $isDraft() == false && $approvalsCount() < 1
-        then: $addLabel("waiting-for-review")
-
   # This workflow labels pull requests based on the pull request change type.
   # This helps pick pull requests based on their change type.
   - name: change-type-labelling
@@ -99,14 +68,6 @@ workflows:
       - if: $hasFileExtensions([".md", ".txt"])
         then: $addLabel("docs")
         else: $removeLabel("docs")
-      # Label pull requests with `infra` if they modify Terraform files.
-      - if: $hasFileExtensions([".tf"])
-        then: $addLabel("infra")
-        else: $removeLabel("infra")
-      # Label pull requests with `dependencies` if they only modify `package.json` and `package.lock` files.
-      - if: $hasFileExtensions(["package.json", "package-lock.json"])
-        then: $addLabel("dependencies")
-        else: $removeLabel("dependencies")
 
   # This workflow validates that pull requests do not contain changes to the license.
   # This helps avoid unwanted license modifications.
@@ -117,3 +78,31 @@ workflows:
       - if: $hasFilePattern("**/LICENSE*")
         then: $fail("License files cannot be modified")
 
+
+  - name: merge strategy ship
+    trigger: $rule("review-strategy:ship")
+    stages:
+      - actions: 
+          - $review("REQUEST_CHANGES", "The pull request has git conflicts. Please fix them.")
+        until: '!$hasGitConflicts()'
+      - actions: 
+          - $review("REQUEST_CHANGES", "Pull request is not rebaseable. Please rebase it manually.")
+        until: $selectFromContext("$.rebaseable") == "true"
+      - actions:
+          - $comment("Pull request is not up to date with the base branch. Reviewpad will rebase it.")
+          - $rebase()
+        until: $isUpdatedWithBaseBranch() && $hasLinearHistory()
+      - actions: 
+          - $review("REQUEST_CHANGES", "Some checks are failing. Please fix them.")
+        until: '!$hasAnyCheckRunCompleted([], ["failure"])'
+      - actions:
+          - $info("Reviewpad is waiting for all checks to complete with success.")
+        until: $haveAllChecksRunCompleted(["reviewpad"], "success", ["Copilot for PRs"])
+      - actions:
+          - $comment("The merge is blocked by the label **`do-not-merge`**.")
+        until: '!$isElementOf("do-not-merge", $labels())'
+      - actions:
+          - $assignAssignees([$author()])
+          - $approve("Pull request is in `ship` mode. Reviewpad will merge it.")
+          - $merge("squash")
+          - $deleteHeadBranch()
