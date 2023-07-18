@@ -1,7 +1,8 @@
-# grokking-code-reviews
-Grokking Code Reviews
+# Grokking Code Reviews
 
-## Table of contents
+The definitive guide to code reviews for developers and engineering leaders.
+
+## Index
 
 - [Why this book?](./why-this-book.md)
 - [Who is this book for?](./who-is-this-book-for.md)
